@@ -6,7 +6,6 @@ from metagpt.actions import Action
 import os
 import json
 from typing import Any
-from abc import abstractmethod
 from snowdream_company.actions.restorable_action import RestorableAction
 
 class RestorableRole(Role):
@@ -22,6 +21,8 @@ class RestorableRole(Role):
   """当前角色是否需要恢复行为"""
   restoring_action: bool = False
   """是否正在恢复行为"""
+  restorable: bool = False
+  """静态属性，用于标记当前有角色是否可恢复"""
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.__project_path = kwargs["project_path"] or ""
@@ -53,7 +54,7 @@ class RestorableRole(Role):
 
     self.check_need_restore_action() # NOTICE: 如果记忆都没有恢复就无需恢复动作了
 
-  def get_action(self, state: dict[str, Any]) -> Action:
+  def get_action_from_state(self, state: dict[str, Any]) -> Action:
     """
     根据state.json记录的信息，从注册的action列表里获取到记录的action class
     """
@@ -72,6 +73,20 @@ class RestorableRole(Role):
       state: dict[str, Any] = json.load(file)
       if state["role"] == self.profile and state["name"] == self.name:
         self.need_restore_action = True
+        RestorableRole.restorable = True
+
+  def get_restorable_action(self):
+    state_path = os.path.join(self.__project_path, "state.json")
+    with open(state_path, "r", encoding="utf-8") as file:
+      state: dict[str, Any] = json.load(file)
+      action = self.get_action_from_state(state)
+      if isinstance(action, RestorableAction):
+        action.to_restore(state["finished"])
+        logger.info(f"{action.name}: 开始恢复之前的行为")
+      else:
+        logger.info(f"{action.name}不是可恢复的")
+
+      return action
 
   async def restore_action(self):
     """
@@ -84,7 +99,7 @@ class RestorableRole(Role):
       if self.todo.name != state["action_name"]:
         return self.rc.memory.get(k=1)[0]
       self.rc.memory.delete_newest()
-      action = self.get_action(state)
+      action = self.get_action_from_state(state)
       if isinstance(action, RestorableAction):
         action.to_restore(state["finished"])
         logger.info(f"{action.name}: 开始恢复之前的行为")
@@ -95,6 +110,7 @@ class RestorableRole(Role):
       self.restoring_action = True
       res = await self._act()
       self.restoring_action = False
+      RestorableRole.restorable = False # 恢复完成
 
       return res
 

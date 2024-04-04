@@ -8,6 +8,8 @@ from metagpt.logs import logger
 from metagpt.roles.role import RoleContext
 from snowdream_company.roles.restorable_role import RestorableRole
 from snowdream_company.actions.restorable_action import RestorableAction
+from snowdream_company.tool.markdown import get_lang_content
+from metagpt.actions.add_requirement import UserRequirement
 
 class DemandAnalysis(RestorableAction):
   """
@@ -15,7 +17,7 @@ class DemandAnalysis(RestorableAction):
   """
   PROMPT_TEMPLATE: str = """
   这里有一个来自你和用户之间的对话记录（其中you代表你，user代表用户）：{instruction}。
-  你需要根据这个对话记录分析其中已经明确的以及潜在的任务需求，请用JSON数组的形式返回一个需求列表。
+  你需要根据这个对话记录分析和整理出其中已经明确的以及潜在的任务需求，请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表。
   """
 
   name: str = "DemandAnalysis"
@@ -26,7 +28,7 @@ class DemandAnalysis(RestorableAction):
     prompt = self.PROMPT_TEMPLATE.format(instruction=instruction)
     res = await self._aask(prompt)
 
-    return res
+    return get_lang_content(res)
 
 class DemandComuniacate(RestorableAction):
   """
@@ -121,6 +123,21 @@ class DemandComuniacate(RestorableAction):
 
     return "\n".join(records)
 
+class DemandConfirmationAnswer(RestorableAction):
+  name: str = "DemandConfirmationAnswer"
+  PROMPT_TEMPLATE: str = """
+  """
+
+  async def run(self, instruction: str):
+    pass
+
+class DemandConfirmationQuestion(RestorableAction):
+  name: str = "DemandConfirmationQuestion"
+  PROMPT_TEMPLATE: str = """
+  """
+
+  async def run(self, instruction: str):
+    pass
 
 
 class DemandAnalyst(RestorableRole):
@@ -134,13 +151,42 @@ class DemandAnalyst(RestorableRole):
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.set_actions([DemandComuniacate, DemandAnalysis])
-    self._set_react_mode(react_mode="by_order")
+    self._set_react_mode(react_mode="react", max_react_loop=999)
+    self._watch([UserRequirement])
+
+  async def _think(self) -> bool:
+    # think函数本质上就是给出todo的action，为none就是结束
+    if RestorableRole.restorable and not self.need_restore_action:
+      self.set_todo(None)
+      return True
+
+    if self.need_restore_action:
+      self.rc.memory.delete_newest()
+      self.restoring_action = True
+      self.set_todo(self.get_restorable_action())
+      return True
+
+    if self.rc.memory.count() > 0:
+      self.set_todo(self.state_machine())
+      return True
+
+    return await super()._think()
+
+  def state_machine(self):
+    msg = self.get_memories(k=1)[0]
+
+    if msg.role == "user":
+      return DemandComuniacate
+
+    if msg.role == self.profile and msg.cause_by == type(DemandComuniacate):
+      return DemandAnalysis
+
+    if msg.role == self.profile and msg.cause_by == type(DemandAnalysis):
+      return None
+
+    return None
 
   async def _act(self) -> Message:
-    if self.need_restore_action:
-      res = await self.restore_action()
-      return res
-
     logger.info(f"{self._setting}: to do {self.rc.todo}({self.rc.todo.name})")
     todo = self.rc.todo
     msg = self.get_memories(k=1)[0]
@@ -154,7 +200,13 @@ class DemandAnalyst(RestorableRole):
 
     record = Message(content=answer, role=self.profile, cause_by=type(todo))
     self.update_state(todo, True)
-    if not self.restoring_action:
+    # NOTICE: 仅正在恢复行为且之前行为已经结束的时候不需要保存记忆（因为之前记忆已经存在了）
+    if not self.restoring_action or not todo.finished:
       self.add_memory(record)
+
+    if isinstance(todo, RestorableAction):
+      self.restoring_action = False
+      self.need_restore_action = False
+      RestorableRole.restorable = False # 恢复完成
 
     return record
