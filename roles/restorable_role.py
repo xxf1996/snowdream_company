@@ -7,6 +7,8 @@ import os
 import json
 from typing import Any
 from snowdream_company.actions.restorable_action import RestorableAction
+from abc import abstractmethod
+from metagpt.actions.add_requirement import UserRequirement
 
 class RestorableRole(Role):
   """
@@ -14,7 +16,7 @@ class RestorableRole(Role):
   """
   __memory_path: str = ""
   __project_path: str = ""
-  __skip_ask = True
+  __skip_ask = False
 
   """是否跳过恢复记忆的询问"""
   need_restore_action: bool = False
@@ -120,6 +122,7 @@ class RestorableRole(Role):
     """
     添加一条记忆，并更新记忆文件
     """
+    msg.sent_from = self.name
     self.rc.memory.add(msg)
     self.update_memory()
 
@@ -150,6 +153,53 @@ class RestorableRole(Role):
         "finished": finished,
       }, file)
 
+  def get_action(self, action: Action):
+    """
+    根据action class获取对应的行为实例
+    """
+    target = [item for item in self.actions if isinstance(item, action)]
+
+    if len(target) > 0:
+      return target[0]
+
+    return None
+
+  def set_watch(self, actions: list[Action]):
+    if self.need_restore_action:
+      self._watch(actions + [UserRequirement])
+    else:
+      self._watch(actions)
+
+
+  @abstractmethod
+  def state_machine(self) -> Action | None:
+    """
+    行为状态机，根据记忆和接受的消息，返回下一个要做的行为
+    """
+    pass
+
+  async def _think(self) -> bool:
+    # think函数本质上就是给出todo的action，为none就是结束
+    self.update_memory()
+    if RestorableRole.restorable and not self.need_restore_action:
+      self.rc.memory.delete_newest() # 因为用户需求默认会发给所有人
+      self.set_todo(None)
+      return True
+
+    if self.need_restore_action:
+      self.rc.memory.delete_newest()
+      self.restoring_action = True
+      self.set_todo(self.get_restorable_action())
+      return True
+
+    if self.rc.memory.count() > 0:
+      self.set_todo(self.state_machine())
+      return True
+
+    return await super()._think()
+
+  def get_system_msg(self):
+    return [f"你是一名{self.profile}， 名字叫{self.name}. 你的目标是{self.goal}。"]
 
   def _init_memory(self):
     """
