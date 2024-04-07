@@ -60,8 +60,8 @@ class RestorableRole(Role):
     """
     根据state.json记录的信息，从注册的action列表里获取到记录的action class
     """
-    action_class = [action for action in self.actions if action.name == state["action_name"]][0]
-    return action_class.model_validate(state["action"])
+    action = [action for action in self.actions if action.name == state["action_name"]][0]
+    return action.model_validate(state["action"])
 
   def check_need_restore_action(self):
     """
@@ -126,6 +126,8 @@ class RestorableRole(Role):
     self.rc.memory.add(msg)
     self.update_memory()
 
+    return msg
+
 
   def update_memory(self):
     """
@@ -170,6 +172,8 @@ class RestorableRole(Role):
     else:
       self._watch(actions)
 
+    logger.info(self.rc.watch)
+
 
   @abstractmethod
   def state_machine(self) -> Action | None:
@@ -180,26 +184,28 @@ class RestorableRole(Role):
 
   async def _think(self) -> bool:
     # think函数本质上就是给出todo的action，为none就是结束
-    self.update_memory()
     if RestorableRole.restorable and not self.need_restore_action:
       self.rc.memory.delete_newest() # 因为用户需求默认会发给所有人
       self.set_todo(None)
+      self.update_memory()
       return True
 
     if self.need_restore_action:
       self.rc.memory.delete_newest()
       self.restoring_action = True
       self.set_todo(self.get_restorable_action())
+      self.update_memory()
       return True
 
     if self.rc.memory.count() > 0:
+      self.update_memory() # NOTICE: 由watch引发的think，通常会增加一条消息，所以先同步记忆文件，避免下一步动作还没完成就结束时丢失了记忆
       self.set_todo(self.state_machine())
       return True
 
     return await super()._think()
 
   def get_system_msg(self):
-    return [f"你是一名{self.profile}， 名字叫{self.name}. 你的目标是{self.goal}。"]
+    return f"你是一名{self.profile}， 名字叫{self.name}. 你的目标是{self.goal}。"
 
   def _init_memory(self):
     """

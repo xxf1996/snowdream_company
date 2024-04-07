@@ -126,19 +126,27 @@ class DemandComuniacate(RestorableAction):
 
 class DemandConfirmationAnswer(RestorableAction):
   name: str = "DemandConfirmationAnswer"
-  PROMPT_TEMPLATE: str = """
-  这里有一份你总结的需求列表：{doc}
-  有人对其中的某些需求有疑问，你需要针对他们的询问进行回答。下面是你们的聊天记录（其中you代表你）：{history}
+  PROMPT_TEMPLATE: str = """{system}
+  这里有一份你总结的需求列表（三个反引号之间）：```{doc}```。
+
+  用户对其中的某些需求有疑问，根据你们的对话记录，你需要针对用户的询问进行回答。
+
+  请注意，你的任务是写进行回答，而不是模仿聊天记录！不用说出你的名字。
   """
 
-  async def run(self, rc: RoleContext):
-    last_msg = rc.memory.get(k=1)[0]
-    memories = rc.memory.get()
-    history = self.get_history(memories, last_msg.sent_from)
+  async def run(self, role: RestorableRole):
+    last_msg = role.rc.memory.get(k=1)[0]
+    if self.need_restore and self.finished:
+      return last_msg.content
+    memories = role.rc.memory.get()
+    # history = self.get_history(memories, last_msg.sent_from)
     doc = self.get_doc(memories)
-    prompt = self.PROMPT_TEMPLATE.format(history=history, doc=doc)
+    system_msg = self.PROMPT_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
 
-    res = await self._aask(prompt)
+    res = await self.llm.aask(
+      msg=self.get_history_messages(memories, last_msg.sent_from),
+      system_msgs=[system_msg]
+    )
 
     return res
 
@@ -146,13 +154,31 @@ class DemandConfirmationAnswer(RestorableAction):
     records: list[str] = []
     for memory in memories:
       if is_same_action(memory.cause_by, str(DemandConfirmationAsk)) and memory.sent_from == name:
-        records.append(f"{name}: {memory.content}")
+        records.append(f"other: {memory.content}")
       elif is_same_action(memory.cause_by, str(DemandConfirmationAnswer)):
         records.append(f"you: {memory.content}")
       else:
         continue
 
     return "\n".join(records)
+
+  def get_history_messages(self, memories: list[Message], name: str):
+    messages: list[dict[str, str]] = []
+    for memory in memories:
+      if is_same_action(memory.cause_by, str(DemandConfirmationAsk)) and memory.sent_from == name:
+        messages.append({
+          "role": "user",
+          "content": memory.content
+        })
+      elif is_same_action(memory.cause_by, str(DemandConfirmationAnswer)):
+        messages.append({
+          "role": "assistant",
+          "content": memory.content
+        })
+      else:
+        continue
+
+    return messages
 
   def get_doc(self, memories: list[Message]):
     docs = [memory for memory in memories if is_same_action(memory.cause_by, str(DemandAnalysis))]
@@ -161,24 +187,30 @@ class DemandConfirmationAnswer(RestorableAction):
 
 class DemandConfirmationAsk(RestorableAction):
   name: str = "DemandConfirmationAsk"
-  PROMPT_TEMPLATE: str = """
-  这里是你和需求分析师之间的聊天记录（三个~之间，其中you代表你）：~~~{history}~~~。
-
+  PROMPT_TEMPLATE: str = """{system}
   这里有一份需求列表（三个反引号之间）：```{doc}```。
 
-  你需要从你负责的工作职能出发，根据以上提供的需求列表以及你们的聊天记录，找到这些需求的一些存在的疑问和细节问题，对需求分析师进行提问，请写出你的提问内容（如果你觉得在你的角度来看，已经没有什么大的问题了，请直接对需求分析师回答END）。
+  你需要从你负责的工作职能出发，根据以上提供的需求列表以及你和用户的对话记录，找到这些需求的一些存在的疑问和细节问题，对用户进行提问，请写出你的提问内容（如果你觉得在你的角度来看，已经没有什么大的问题了，请直接对用户回答END）。
 
   请注意，你的任务是写出提问内容，而不是模仿聊天记录！不用说出你的名字。
+
+  请记住，如果没有疑问或者想结束询问，直接回答END（即只有END这一个词）即可！
   """
 
   async def run(self, role: RestorableRole):
     last_msg = role.rc.memory.get(k=1)[0]
+    if self.need_restore and self.finished:
+      return last_msg.content
     memories = role.rc.memory.get()
-    history = self.get_history(memories, last_msg.sent_from)
+    # history = self.get_history(memories, last_msg.sent_from)
     doc = self.get_doc(memories)
-    prompt = self.PROMPT_TEMPLATE.format(history=history, doc=doc)
+    system_msg = self.PROMPT_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
 
-    res = await self._aask(prompt, role.get_system_msg())
+    # res = await self._aask(prompt, role.get_system_msg())
+    res = await self.llm.aask(
+      msg=self.get_history_messages(memories, last_msg.sent_from),
+      system_msgs=[system_msg]
+    )
 
     return res
 
@@ -186,7 +218,7 @@ class DemandConfirmationAsk(RestorableAction):
     records: list[str] = []
     for memory in memories:
       if is_same_action(memory.cause_by, str(DemandConfirmationAnswer)) and memory.sent_from == name:
-        records.append(f"{name}: {memory.content}")
+        records.append(f"other: {memory.content}")
       elif is_same_action(memory.cause_by, str(DemandConfirmationAsk)):
         records.append(f"you: {memory.content}")
       else:
@@ -194,10 +226,77 @@ class DemandConfirmationAsk(RestorableAction):
 
     return "\n".join(records)
 
+  def get_history_messages(self, memories: list[Message], name: str):
+    messages: list[dict[str, str]] = []
+    for memory in memories:
+      if is_same_action(memory.cause_by, str(DemandConfirmationAnswer)) and memory.sent_from == name:
+        messages.append({
+          "role": "user",
+          "content": memory.content
+        })
+      elif is_same_action(memory.cause_by, str(DemandConfirmationAsk)):
+        messages.append({
+          "role": "assistant",
+          "content": memory.content
+        })
+      else:
+        continue
+
+    return messages
+
   def get_doc(self, memories: list[Message]):
     docs = [memory for memory in memories if is_same_action(memory.cause_by, str(DemandAnalysis))]
     return docs[-1].content
 
+
+class DemandChange(RestorableAction):
+  """需求变更"""
+  name: str = "DemandChange"
+  SYSTEM_TEMPLATE: str = """{system}
+  这里有一份你总结的需求列表（三个反引号之间）：```{doc}```。
+  """
+
+  PROMPT_TEMPLATE: str = """我这边暂时没问题了，你需要根据之前的需求列表以及我们的对话记录总结出新的需求列表。
+
+  请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表。
+  """
+
+  async def run(self, role: RestorableRole):
+    last_msg = role.rc.memory.get(k=1)[0]
+    if self.need_restore and self.finished:
+      return last_msg.content
+    memories = role.rc.memory.get()
+    doc = self.get_doc(memories)
+    system_msg = self.SYSTEM_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
+
+    res = await self.llm.aask(
+      msg=self.get_history_messages(memories, last_msg.sent_from),
+      system_msgs=[system_msg]
+    )
+
+    return get_lang_content(res)
+
+  def get_doc(self, memories: list[Message]):
+    docs = [memory for memory in memories if is_same_action(memory.cause_by, str(DemandAnalysis))]
+    return docs[-1].content
+
+  def get_history_messages(self, memories: list[Message], name: str):
+    messages: list[dict[str, str]] = []
+    for memory in memories:
+      if is_same_action(memory.cause_by, str(DemandConfirmationAsk)) and memory.sent_from == name:
+        messages.append({
+          "role": "user",
+          "content": memory.content if memory.content != "END" else self.PROMPT_TEMPLATE
+        })
+      elif is_same_action(memory.cause_by, str(DemandConfirmationAnswer)):
+        messages.append({
+          "role": "assistant",
+          "content": memory.content
+        })
+      else:
+        continue
+
+    return messages
 
 class DemandAnalyst(RestorableRole):
   """
@@ -209,7 +308,7 @@ class DemandAnalyst(RestorableRole):
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
-    self.set_actions([DemandComuniacate, DemandAnalysis, DemandConfirmationAnswer])
+    self.set_actions([DemandComuniacate, DemandAnalysis, DemandConfirmationAnswer, DemandChange])
     self._set_react_mode(react_mode="react", max_react_loop=999)
     self.set_watch([DemandConfirmationAsk])
 
@@ -225,11 +324,13 @@ class DemandAnalyst(RestorableRole):
     if msg.role == self.profile and is_same_action(msg.cause_by, str(DemandAnalysis)):
       return None
 
+    # 正常的回答需求询问
     if is_same_action(msg.cause_by, str(DemandConfirmationAsk)) and msg.content != "END":
       return self.get_action(DemandConfirmationAnswer)
 
+    # 需求询问结束
     if is_same_action(msg.cause_by, str(DemandConfirmationAsk)) and msg.content == "END":
-      return None
+      return self.get_action(DemandChange)
 
     return None
 
@@ -238,25 +339,38 @@ class DemandAnalyst(RestorableRole):
     todo = self.rc.todo
     msg = self.get_memories(k=1)[0]
     answer = ''
+    send_to: list[str] = []
     self.update_state(todo)
     if isinstance(todo, DemandComuniacate):
       answer = await todo.run(msg.content, role=self)
       todo.role = None # NOTICE: 避免保存action时序列化role内容
     elif isinstance(todo, DemandConfirmationAnswer):
-      answer = await todo.run(self.rc)
+      answer = await todo.run(self)
       # TODO: 针对answer应该需要针对具体的人，不然多人同时进行ask的时候就会出现问题
+      send_to.append(msg.sent_from)
+    elif isinstance(todo, DemandChange):
+      answer = await todo.run(self)
+      send_to.append(msg.sent_from)
     else:
       answer = await todo.run(msg.content)
 
     record = Message(content=answer, role=self.profile, cause_by=type(todo))
+    if len(send_to) > 0:
+      record.send_to = set(send_to)
+
+    if self.restoring_action and todo.finished:
+      record = msg # TODO: 事实上所有恢复的已结束动作直接返回消息即可，无需再执行动作？
+
     self.update_state(todo, True)
     # NOTICE: 仅正在恢复行为且之前行为已经结束的时候不需要保存记忆（因为之前记忆已经存在了）
     if not self.restoring_action or not todo.finished:
-      self.add_memory(record)
+      record = self.add_memory(record)
 
     if isinstance(todo, RestorableAction):
       self.restoring_action = False
       self.need_restore_action = False
       RestorableRole.restorable = False # 恢复完成
+      todo.finished = False
+      todo.need_restore = False
 
     return record

@@ -1,7 +1,7 @@
 # UI设计师
 from metagpt.schema import Message
 from snowdream_company.roles.restorable_role import RestorableRole
-from snowdream_company.roles.demand_analyst import DemandAnalysis, DemandConfirmationAsk
+from snowdream_company.roles.demand_analyst import DemandAnalysis, DemandConfirmationAsk, DemandConfirmationAnswer
 from snowdream_company.actions.restorable_action import RestorableAction
 from metagpt.logs import logger
 from snowdream_company.tool.type import is_same_action
@@ -15,15 +15,16 @@ class UIDesigner(RestorableRole):
     super().__init__(**kwargs)
     self.set_actions([DemandConfirmationAsk])
     self._set_react_mode(react_mode="react", max_react_loop=999)
-    self.set_watch([DemandAnalysis])
+    self.set_watch([DemandAnalysis, DemandConfirmationAnswer])
 
   def state_machine(self):
     msg = self.get_memories(k=1)[0]
 
-    logger.info(DemandAnalysis)
-
     if is_same_action(msg.cause_by, str(DemandAnalysis)):
       return self.get_action(DemandConfirmationAsk) # FIXME: 搞不懂这里之前没用实例为啥也可以？
+
+    if is_same_action(msg.cause_by, str(DemandConfirmationAnswer)) and self.name in msg.send_to:
+      return self.get_action(DemandConfirmationAsk)
 
     return None
 
@@ -44,11 +45,13 @@ class UIDesigner(RestorableRole):
     self.update_state(todo, True)
     # NOTICE: 仅正在恢复行为且之前行为已经结束的时候不需要保存记忆（因为之前记忆已经存在了）
     if not self.restoring_action or not todo.finished:
-      self.add_memory(record)
+      record = self.add_memory(record)
 
     if isinstance(todo, RestorableAction):
       self.restoring_action = False
       self.need_restore_action = False
       RestorableRole.restorable = False # 恢复完成
+      todo.finished = False
+      todo.need_restore = False
 
     return record
