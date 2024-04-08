@@ -1,6 +1,9 @@
 # 需求分析师
 
-from typing import Optional
+from datetime import datetime
+import json
+import os
+from typing import Any, Optional
 from metagpt.actions import Action
 from metagpt.roles import Role
 from metagpt.schema import Message
@@ -8,7 +11,7 @@ from metagpt.logs import logger
 from metagpt.roles.role import RoleContext
 from snowdream_company.roles.restorable_role import RestorableRole
 from snowdream_company.actions.restorable_action import RestorableAction
-from snowdream_company.tool.markdown import get_lang_content
+from snowdream_company.tool.markdown import demands_to_markdown, get_lang_content
 from metagpt.actions.add_requirement import UserRequirement
 from snowdream_company.tool.type import is_same_action
 
@@ -258,7 +261,11 @@ class DemandChange(RestorableAction):
 
   PROMPT_TEMPLATE: str = """我这边暂时没问题了，你需要根据之前的需求列表以及我们的对话记录总结出新的需求列表。
 
-  请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表。
+  请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表；其中“需求描述”要尽可能的详尽和尽可能多的实现细节，以便实现的时候没有歧义。
+
+  同时请用一段文字说明需求文档变动的内容，重点关注变动项，文字尽可能简洁明确一点；这段文字请按照markdown的代码块格式进行包裹，代码块内不需要任何的markdown标题！代码语言设置为demand-change。
+
+  请注意demand-change代码块和json代码块之间要完全区分开！不要互相包含！请保证各个代码块是完整的！
   """
 
   async def run(self, role: RestorableRole):
@@ -269,12 +276,14 @@ class DemandChange(RestorableAction):
     doc = self.get_doc(memories)
     system_msg = self.SYSTEM_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
 
-    res = await self.llm.aask(
+    answer = await self.llm.aask(
       msg=self.get_history_messages(memories, last_msg.sent_from),
       system_msgs=[system_msg]
     )
 
-    return get_lang_content(res)
+    res = self.save_doc(role.get_project_path(), answer)
+
+    return json.dumps(res)
 
   def get_doc(self, memories: list[Message]):
     docs = [memory for memory in memories if is_same_action(memory.cause_by, str(DemandAnalysis))]
@@ -297,6 +306,29 @@ class DemandChange(RestorableAction):
         continue
 
     return messages
+
+  def save_doc(self, project_path: str, answer: str):
+    demand_json = get_lang_content(answer)
+    demands: list[dict[str, Any]] = json.loads(demand_json)
+    demand_change = get_lang_content(answer, lang="demand-change")
+    demand_content = demands_to_markdown(demands)
+    now = datetime.now()
+    formatted_time = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    doc = f"# 需求变更记录\n\n## {formatted_time}\n\n{demand_change}\n\n{demand_content}"
+    doc_path = os.path.join(project_path, "prd", "1.0.0.md")
+    with open(doc_path, "w", encoding="utf-8") as f:
+      f.write(doc)
+
+    return {
+      "demands": demand_json,
+      "demand_change": {
+        "version": "1.0.0",
+        "content": demand_change,
+        "time": formatted_time
+      }
+    }
+
 
 class DemandAnalyst(RestorableRole):
   """

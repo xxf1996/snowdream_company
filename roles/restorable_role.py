@@ -228,3 +228,6 @@ class RestorableRole(Role):
     }
     with open(state_path, "w", encoding="utf-8") as file:
       json.dump(init_state, file)
+
+  def get_project_path(self):
+    return self.__project_path
