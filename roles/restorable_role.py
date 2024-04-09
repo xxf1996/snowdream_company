@@ -68,8 +68,7 @@ class RestorableRole(Role):
     检查当前角色是否需要恢复行为
     """
     state_path = os.path.join(self.__project_path, "state.json")
-    if not os.path.exists(state_path):
-      self._init_state()
+    if self.is_empty_state():
       return
     with open(state_path, "r", encoding="utf-8") as file:
       state: dict[str, Any] = json.load(file)
@@ -144,9 +143,7 @@ class RestorableRole(Role):
     基于当前角色和当前进行的行为更新state.json
     """
     state_path = os.path.join(self.__project_path, "state.json")
-    if not os.path.exists(state_path):
-      self._init_state()
-    with open(os.path.join(self.__project_path, "state.json"), "w", encoding="utf-8") as file:
+    with open(state_path, "w", encoding="utf-8") as file:
       json.dump({
         "role": self.profile,
         "name": self.name,
@@ -184,7 +181,8 @@ class RestorableRole(Role):
 
   async def _think(self) -> bool:
     # think函数本质上就是给出todo的action，为none就是结束
-    if RestorableRole.restorable and not self.need_restore_action:
+    # FIXME: RestorableRole的静态成员居然不存在？
+    if hasattr(RestorableRole, "restorable") and RestorableRole.restorable and not self.need_restore_action:
       self.rc.memory.delete_newest() # 因为用户需求默认会发给所有人
       self.set_todo(None)
       self.update_memory()
@@ -231,3 +229,13 @@ class RestorableRole(Role):
 
   def get_project_path(self):
     return self.__project_path
+
+  def is_empty_state(self):
+    state_path = os.path.join(self.__project_path, "state.json")
+
+    if not os.path.exists(state_path):
+      return True
+
+    with open(state_path, "r", encoding="utf-8") as file:
+      state: dict[str, Any] = json.load(file)
+      return state["action_name"] == ""

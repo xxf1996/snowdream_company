@@ -7,6 +7,7 @@ from snowdream_company.roles.restorable_role import RestorableRole
 from snowdream_company.roles.demand_analyst import DemandAnalysis, DemandChange, DemandConfirmationAsk, DemandConfirmationAnswer
 from snowdream_company.actions.restorable_action import RestorableAction
 from metagpt.logs import logger
+from snowdream_company.tool.browser import generate_screenshots
 from snowdream_company.tool.markdown import get_html_comment, get_lang_content
 from snowdream_company.tool.type import is_same_action
 
@@ -16,11 +17,41 @@ class UIAnalysis(RestorableAction):
   这里有一份来自产品经理同事发布的需求文档（三个反引号之间）：```{doc}```。
   """
   PROMPT_TEMPLATE: str = """
-  根据需求文档，你需要从中提取出你自己的工作任务（即UI设计师需要做的事情）。根据你的任务，设计出相应具有全部细节的UI设计稿，要确保给出的设计稿可以让web前端开发同事进行直接使用；请用html+css的格式进行设计，并不要求你实现最终的功能代码，你只需要用html+css进行样式的设计即可！可以根据需要拆分不同的模块进行设计，每个模块需要用一个单独的html代码块（对应模块的css样式也包含在html代码块之中！）来表示，并在html代码块第一行中用注释标注出该模块的作用和模块名称。
+  根据需求文档，你需要从中提取出你自己的工作任务（即UI设计师需要做的事情）。根据你的任务，完成相应具有尽可能多细节的UI设计稿，要确保给出的设计稿可以让web前端开发同事进行直接使用；请用html+css的格式进行设计，并不要求你实现最终的功能代码，你只需要用html+css进行样式的设计即可！可以根据需要拆分不同的模块进行设计，每个模块需要用一个单独的html代码块（对应模块的css样式也包含在html代码块之中！）来表示，并在html代码块第一行中用注释标注出该模块的作用和模块名称。
 
   请注意不是简单的把需求文档加上样式！确保设计稿的内容是清晰且没有重复的！请务必确保不要出现单独的css代码块，所有的css样式（包括css动画）务必应用到具体的html元素上！
 
-  如果有需要设计图片的任务，请用详细的文字描述出该图片的内容及尺寸等细节信息，并用markdown代码块将这段文字进行包裹，代码块语言设置为generate-image；每一个图片的描述用一个单独的generate-image代码块进行表示。
+  如果有需要设计图片的任务，请用详细的文字描述出该图片的内容及尺寸等细节信息，并用markdown代码块将这段文字进行包裹，代码块语言设置为generate-image；每一个图片的描述用一个单独的generate-image代码块进行表示。以下是一个满足上述格式的回答示例，你可以参照这个格式进行回答：
+
+  ```html
+  <!-- 模块名称和描述 -->
+  <div>该模块的布局结构</div>
+  ...
+  <style>
+  /** 该模块的样式和动画 */
+  ...
+  </style>
+  ```
+
+  ```html
+  <!-- 模块名称和描述 -->
+  <div>该模块的布局结构</div>
+  ...
+  <style>
+  /** 该模块的样式和动画 */
+  ...
+  </style>
+  ```
+
+  ```generate-image
+  关于图片的描述信息
+  ...
+  ```
+
+  ```generate-image
+  关于图片的描述信息
+  ...
+  ```
   """
 
   async def run(self, role: RestorableRole):
@@ -38,18 +69,21 @@ class UIAnalysis(RestorableAction):
       msg=prompt
     )
 
-    self.save_ui(role.get_project_path(), answer)
+    await self.save_ui(role.get_project_path(), answer)
 
     return answer
 
-  def save_ui(self, project_path: str, answer: str):
+  async def save_ui(self, project_path: str, answer: str):
     ui_list: list[str] = get_lang_content(answer, is_all=True, lang="html")
+    html_paths: list[str] = []
     # TODO: 图片资源生成&人机对话确认
     for ui in ui_list:
       name: str = get_html_comment(ui)
       ui_path = os.path.join(project_path, "ui", "1.0.0", f"{name}.html")
+      html_paths.append(ui_path)
       with open(ui_path, "w", encoding="utf-8") as f:
         f.write(ui)
+    await generate_screenshots(html_paths)
 
 
 
