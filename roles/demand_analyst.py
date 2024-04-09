@@ -100,7 +100,7 @@ class DemandComuniacate(RestorableAction):
   role: Optional[RestorableRole] = None
   SYSTEM_PROMPT: str = """{system}
 
-  你需要根据你和用户的对话记录，针对有疑惑的地方，询问用户具体的需求细节，如果你觉得目前的需求已经很明确了，直接回答END（即只有END这一个词）。
+  你需要根据你和用户的对话记录，针对有疑惑的地方，询问用户具体的需求细节，如果你觉得目前的需求已经很明确了，直接回答end（即只有end这一个词）。
   你不用说出自己的名字，直接说出你的询问内容。
   """
 
@@ -264,11 +264,9 @@ class DemandConfirmationAsk(RestorableAction):
   PROMPT_TEMPLATE: str = """{system}
   这里有一份需求列表（三个反引号之间）：```{doc}```。
 
-  你需要从你负责的工作职能出发，根据以上提供的需求列表以及你和用户的对话记录，找到这些需求的一些存在的疑问和细节问题，对用户进行提问，请写出你的提问内容（如果你觉得在你的角度来看，已经没有什么大的问题了，请直接对用户回答END）。
+  你需要从你负责的工作职能出发，主要关注{focus}方面即可！根据以上提供的需求列表以及你和用户的对话记录，找到这些需求在{focus}方面存在的疑问和细节问题，对用户进行提问，请写出你的提问内容。
 
-  请注意，你的任务是写出提问内容，而不是模仿聊天记录！不用说出你的名字。
-
-  请记住，如果没有疑问或者想结束询问，直接回答END（即只有END这一个词）即可！
+  请注意，不用说出你的名字。如果没有疑问或者想结束询问，直接回答end（即只有end这一个词）即可！
   """
 
   async def run(self, role: RestorableRole):
@@ -278,7 +276,7 @@ class DemandConfirmationAsk(RestorableAction):
     memories = role.rc.memory.get()
     # history = self.get_history(memories, last_msg.sent_from)
     doc = self.get_doc(memories)
-    system_msg = self.PROMPT_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
+    system_msg = self.PROMPT_TEMPLATE.format(system=role.get_system_msg(), doc=doc, focus=role.focus)
 
     # res = await self._aask(prompt, role.get_system_msg())
     res = await self.llm.aask(
@@ -301,7 +299,12 @@ class DemandConfirmationAsk(RestorableAction):
     return "\n".join(records)
 
   def get_history_messages(self, memories: list[Message], name: str):
-    messages: list[dict[str, str]] = []
+    messages: list[dict[str, str]] = [
+      {
+        "role": "user",
+        "content": "你对需求列表有什么疑问吗？"
+      }
+    ]
     for memory in memories:
       if is_same_action(memory.cause_by, str(DemandConfirmationAnswer)) and memory.sent_from == name:
         messages.append({
@@ -327,17 +330,26 @@ class DemandChange(RestorableAction):
   """需求变更"""
   name: str = "DemandChange"
   SYSTEM_TEMPLATE: str = """{system}
-  这里有一份你总结的需求列表（三个反引号之间）：```{doc}```。
+  这里有一份你之前总结的需求列表（三个反引号之间）：```{doc}```。
   """
 
-  PROMPT_TEMPLATE: str = """我这边暂时没问题了，你需要根据之前的需求列表以及我们的对话记录总结出新的需求列表。
+  PROMPT_TEMPLATE: str = """我这边暂时没问题了，你需要结合之前的需求列表以及我们的对话中双方确认好的细节问题，思考总结出新的业务流程，业务流程要尽可能地详细；最终的业务流程图请基于mermaid的flowchart语法进行描述，以下是一个使用mermaid的flowchart语法描述流程图的示例：
 
-  请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表；其中“需求描述”要尽可能的详尽和尽可能多的实现细节，以便实现的时候没有歧义。
+  ```mermaid
+  flowchart LR
+    A[Hard edge] -->|Link text| B(Round edge)
+    B --> C{Decision}
+    C -->|One| D[Result one]
+    C -->|Two| E[Result two]
+  ```
+
+  然后基于总结出的业务流程加上对话中双方确认好的细节，按照涉及到的具体功能点进行需求拆分，然后总结出一份新的需求列表。请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表；其中“需求描述”要尽可能的详尽和尽可能多的实现细节，以便实现的时候没有歧义。
 
   同时请用一段文字说明需求文档变动的内容，重点关注变动项，文字尽可能简洁明确一点；这段文字请按照markdown的代码块格式进行包裹，代码块内不需要任何的markdown标题！代码语言设置为demand-change。
 
   请注意demand-change代码块和json代码块之间要完全区分开！不要互相包含！请保证各个代码块是完整的！
   """
+  # FIXME: 沟通确认的细节完全没有加入到新的需求列表中
 
   async def run(self, role: RestorableRole):
     last_msg = role.rc.memory.get(k=1)[0]

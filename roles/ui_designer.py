@@ -16,6 +16,7 @@ class UIAnalysis(RestorableAction):
   SYSTEM_TEMPLATE: str = """{system}
   这里有一份来自产品经理同事发布的需求文档（三个反引号之间）：```{doc}```。
   """
+  # TODO: 最好结合需求沟通记录？因为需求沟通的结果看起来细节蛮多的……
   PROMPT_TEMPLATE: str = """
   根据需求文档，你需要从中提取出你自己的工作任务（即UI设计师需要做的事情）。根据你的任务，完成相应具有尽可能多细节的UI设计稿，要确保给出的设计稿可以让web前端开发同事进行直接使用；请用html+css的格式进行设计，并不要求你实现最终的功能代码，你只需要用html+css进行样式的设计即可！可以根据需要拆分不同的模块进行设计，每个模块需要用一个单独的html代码块（对应模块的css样式也包含在html代码块之中！）来表示，并在html代码块第一行中用注释标注出该模块的作用和模块名称。
 
@@ -94,6 +95,7 @@ class UIDesigner(RestorableRole):
 
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
+    self.focus = "UI设计、交互设计和用户体验"
     self.set_actions([DemandConfirmationAsk, UIAnalysis])
     self._set_react_mode(react_mode="react", max_react_loop=999)
     self.set_watch([DemandAnalysis, DemandConfirmationAnswer, DemandChange])
@@ -128,6 +130,9 @@ class UIDesigner(RestorableRole):
       answer = await todo.run(msg.content)
 
     record = Message(content=answer, role=self.profile, cause_by=type(todo))
+
+    if self.restoring_action and todo.finished:
+      record = msg # TODO: 事实上所有恢复的已结束动作直接返回消息即可，无需再执行动作？
     self.update_state(todo, True)
     # NOTICE: 仅正在恢复行为且之前行为已经结束的时候不需要保存记忆（因为之前记忆已经存在了）
     if not self.restoring_action or not todo.finished:

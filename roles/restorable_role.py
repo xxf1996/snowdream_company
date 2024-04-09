@@ -25,6 +25,8 @@ class RestorableRole(Role):
   """是否正在恢复行为"""
   restorable: bool = False
   """静态属性，用于标记当前有角色是否可恢复"""
+  focus: str = ""
+  """工作主要关注的方面"""
   def __init__(self, **kwargs):
     super().__init__(**kwargs)
     self.__project_path = kwargs["project_path"] or ""
