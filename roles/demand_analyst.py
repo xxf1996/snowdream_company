@@ -64,6 +64,7 @@ class DemandAnalysis(RestorableAction):
     
     for memory in memories:
       if is_same_action(memory.cause_by, str(DemandComuniacate)):
+        # 需要对end的消息进行处理
         if memory.role == "user" and memory.content == "end":
           continue
         role = "user" if memory.role == "user" else "assistant"
@@ -71,7 +72,6 @@ class DemandAnalysis(RestorableAction):
           "role": role,
           "content": memory.content
         })
-        # TODO: 需要对end的消息进行处理
       if is_same_action(memory.cause_by, str(UserRequirement)):
         records.append({
           "role": "user",
@@ -86,7 +86,7 @@ class DemandAnalysis(RestorableAction):
     demands: list[dict[str, Any]] = json.loads(demand_json)
     demand_content = demands_to_markdown(demands)
     doc_path = os.path.join(project_path, "prd", "1.0.0.md")
-    doc = f"# 业务流程图\n\n{flow_chat}\n\n{demand_content}"
+    doc = f"# 业务流程图\n\n```mermaid\n{flow_chat}\n```\n\n{demand_content}"
 
     with open(doc_path, "w", encoding="utf-8") as f:
       f.write(doc)
@@ -343,13 +343,12 @@ class DemandChange(RestorableAction):
     C -->|Two| E[Result two]
   ```
 
-  然后基于总结出的业务流程加上对话中双方确认好的细节，按照涉及到的具体功能点进行需求拆分，然后总结出一份新的需求列表。请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果需求包含子需求，则可以增加一个“子需求”的字段，存放子需求列表；其中“需求描述”要尽可能的详尽和尽可能多的实现细节，以便实现的时候没有歧义。
+  然后基于总结出的业务流程结合对话中双方确认好的细节，按照涉及到的具体功能点进行需求拆分，然后总结出一份新的需求列表；请务必确保双方确认好的细节全部写入到新的需求列表中！请用JSON数组的形式返回一个需求列表，每个需求都是一个JSON对象，对象包含“优先级”、“标题”和“需求描述”这几个字段，如果某个需求项包含多个任务，则可以增加一个“子需求”的字段，将需求拆分成多个子需求，子需求列表可以存放在“子需求”字段中；其中“需求描述”要尽可能的详尽和尽可能多的实现细节，以便实现的时候没有歧义。
 
   同时请用一段文字说明需求文档变动的内容，重点关注变动项，文字尽可能简洁明确一点；这段文字请按照markdown的代码块格式进行包裹，代码块内不需要任何的markdown标题！代码语言设置为demand-change。
 
   请注意demand-change代码块和json代码块之间要完全区分开！不要互相包含！请保证各个代码块是完整的！
   """
-  # FIXME: 沟通确认的细节完全没有加入到新的需求列表中
 
   async def run(self, role: RestorableRole):
     last_msg = role.rc.memory.get(k=1)[0]
@@ -358,9 +357,10 @@ class DemandChange(RestorableAction):
     memories = role.rc.memory.get()
     doc = self.get_doc(memories)
     system_msg = self.SYSTEM_TEMPLATE.format(system=role.get_system_msg(), doc=doc)
+    history = self.get_history_messages(memories, last_msg.sent_from)
 
     answer = await self.llm.aask(
-      msg=self.get_history_messages(memories, last_msg.sent_from),
+      msg=history,
       system_msgs=[system_msg]
     )
 
@@ -397,8 +397,9 @@ class DemandChange(RestorableAction):
     demand_content = demands_to_markdown(demands)
     now = datetime.now()
     formatted_time = now.strftime("%Y-%m-%d %H:%M:%S")
+    flow_chat = get_lang_content(answer, lang="mermaid")
 
-    doc = f"# 需求变更记录\n\n## {formatted_time}\n\n{demand_change}\n\n{demand_content}"
+    doc = f"# 需求变更记录\n\n## {formatted_time}\n\n{demand_change}\n\n# 业务流程图\n\n```mermaid\n{flow_chat}\n```\n\n{demand_content}"
     doc_path = os.path.join(project_path, "prd", "1.0.0.md")
     with open(doc_path, "w", encoding="utf-8") as f:
       f.write(doc)
