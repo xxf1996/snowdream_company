@@ -7,12 +7,58 @@ from snowdream_company.roles.restorable_role import RestorableRole
 from snowdream_company.roles.demand_analyst import DemandAnalysis, DemandChange, DemandConfirmationAsk, DemandConfirmationAnswer
 from snowdream_company.actions.restorable_action import RestorableAction
 from metagpt.logs import logger
-from snowdream_company.tool.browser import generate_screenshots
+from snowdream_company.tool.browser import generate_vue_element_screenshots
 from snowdream_company.tool.markdown import get_html_comment, get_lang_content
 from snowdream_company.tool.type import is_same_action
 from pathvalidate import sanitize_filename
-
 from snowdream_company.tool.ui import get_user_input
+
+ANALYSIS_FORMAT = """
+```task
+task1: 任务的详细描述
+```
+
+```task
+task2: 任务的详细描述
+```
+
+```html
+<!-- 模块名称和描述 -->
+<div>该模块的布局结构</div>
+...
+<style>
+/** 该模块的样式和动画 */
+...
+</style>
+```
+
+```html
+<!-- 模块名称和描述 -->
+<div>该模块的布局结构</div>
+...
+<style>
+/** 该模块的样式和动画 */
+...
+</style>
+```
+
+```generate-image
+图片名字.png
+关于图片的描述信息
+```
+
+```generate-image
+图片名字.png
+关于图片的描述信息
+```
+
+（注意：task、html和generate-image代码块不能互相包含，每个代码块都是独立的！）
+
+- [ ]: task1
+- [x]: task2
+...
+- [x]: taskN
+"""
 
 class UIAnalysis(RestorableAction):
   name: str = "UIAnalysis"
@@ -21,11 +67,11 @@ class UIAnalysis(RestorableAction):
   """
   # TODO: 最好结合需求沟通记录？因为需求沟通的结果看起来细节蛮多的……
   PROMPT_TEMPLATE: str = """
-  我把调整好的需求文档发给你了，你需要从需求文档和我们的对话记录中提取出你自己的工作任务（即UI设计师需要做的事情），每个任务用单独的task代码块进行表示；根据你整理得到的任务，完成相应任务的UI设计稿，要确保给出的设计稿可以让web前端开发同事进行直接使用；请用html+css的格式进行设计，并不要求你实现最终的功能代码，你只需要用html+css进行样式的设计即可！可以根据需要拆分不同的模块进行设计，每个模块需要用一个单独的html代码块（对应模块的css样式也包含在html代码块之中！）来表示，并在html代码块第一行中用注释标注出该模块的作用和模块名称。
+  我把调整好的需求文档发给你了，你需要从需求文档和我们的对话记录中提取出你自己的工作任务（即UI设计师需要做的事情），每个任务用单独的task代码块进行表示；根据你整理得到的任务，完成相应任务的UI设计稿，要确保给出的设计稿可以让web前端开发同事进行直接使用；请使用element-plus组件库和vue3 setup模式的语法进行设计，并不要求你实现最终的功能代码，你只需要用element-plus组件库进行样式的设计即可！可以根据需要拆分不同的模块进行设计，每个模块需要用一个单独的vue代码块来表示，模块对应的css样式需要写在该模块的style元素中，并在vue代码块第一行中用注释标注出该模块的作用和模块名称。
 
-  请注意不是简单的把需求文档加上样式！确保设计稿的内容是清晰且没有重复的！请务必确保不要出现单独的css代码块，所有的css样式（包括css动画）务必应用到具体的html元素上！
+  请注意不是简单的把需求文档加上样式！确保设计稿的内容是清晰且没有重复的！请务必确保所有的css样式（包括css动画）务必应用到具体的html元素上！
 
-  如果有需要设计图片的任务，请用详细的文字描述出该图片的文件名、内容、风格及尺寸等细节信息，并用markdown代码块将这段文字进行包裹，代码块语言设置为generate-image；每一个图片的描述用一个单独的generate-image代码块进行表示。
+  请列出vue代码块中用到的图片资源，然后加入到设计图片的任务，请用详细的文字描述出该图片的文件名、内容、风格及尺寸等细节信息，并用markdown代码块将这段文字进行包裹，代码块语言设置为generate-image；每一个图片的描述用一个单独的generate-image代码块进行表示。并将vue代码块script部分中所有引用到的npm包用一个json数组列出来。
 
   最后请检查所有任务是否已经完成，按照markdown的任务列表语法整理出任务的完成情况；以下是一个满足上述格式的回答示例，你可以参照这个格式进行回答：
 
@@ -37,22 +83,28 @@ class UIAnalysis(RestorableAction):
   task2: 任务的详细描述
   ```
 
-  ```html
+  ```vue
   <!-- 模块名称和描述 -->
-  <div>该模块的布局结构</div>
-  ...
-  <style>
-  /** 该模块的样式和动画 */
+  <template>
+    <div>该模块的布局结构</div>
+  </template>
+  <script setup>
+  </script>
+  <style scoped>
+  /** 该模块用到的样式和动画 */
   ...
   </style>
   ```
 
-  ```html
+  ```vue
   <!-- 模块名称和描述 -->
-  <div>该模块的布局结构</div>
-  ...
-  <style>
-  /** 该模块的样式和动画 */
+  <template>
+    <div>该模块的布局结构</div>
+  </template>
+  <script setup>
+  </script>
+  <style scoped>
+  /** 该模块用到的样式和动画 */
   ...
   </style>
   ```
@@ -67,6 +119,10 @@ class UIAnalysis(RestorableAction):
   图片名字.png
   关于图片的描述信息
   ...
+  ```
+
+  ```json
+  ["npm包名1", ..., "npm包名N"]
   ```
 
   - [ ]: task1
@@ -80,7 +136,7 @@ class UIAnalysis(RestorableAction):
     if self.need_restore and self.finished:
       return last_msg.content
 
-    if self.need_restore:
+    if self.need_restore and is_same_action(last_msg.cause_by, self.name):
       res: Message = await self.restore(role)
       return res
 
@@ -98,7 +154,7 @@ class UIAnalysis(RestorableAction):
     # 这算是初稿
     draft_msg = Message(content=answer, role=role.profile, cause_by=self._get_draft_type())
     role.add_memory(draft_msg)
-    res = await self.get_user_answer(role, answer)
+    res = await self.get_user_answer(role)
 
     return res
 
@@ -117,7 +173,7 @@ class UIAnalysis(RestorableAction):
     if user_answer == "end":
       return role.rc.memory.get(k=1)[0]
 
-    content = f"{user_answer}。请根据我的修改意见在之前的基础上重新设计UI，并按照上面约定的格式给出修改后的完整UI设计稿（即要包含没有改动的部分！）。"
+    content = f"{user_answer}。请根据我的修改意见在之前你给UI设计的基础上重新设计UI，你可以参照这个格式给出修改后的完整UI设计稿（即要包含没有改动的部分！）：\n{ANALYSIS_FORMAT}"
     user_msg = Message(content=content, role="user", cause_by=self._get_user_answer_type())
     role.add_memory(user_msg)
     res = await self.get_ui_draft(role)
@@ -145,16 +201,17 @@ class UIAnalysis(RestorableAction):
 
   async def save_ui(self, project_path: str, answer: str):
     self.clear_ui(project_path)
-    ui_list: list[str] = get_lang_content(answer, is_all=True, lang="html")
-    html_paths: list[str] = []
+    ui_list: list[str] = get_lang_content(answer, is_all=True, lang="vue")
+    vue_paths: list[str] = []
+    imports: list[str] = json.loads(get_lang_content(answer, lang="json"))
     # TODO: 图片资源生成
     for ui in ui_list:
       name: str = sanitize_filename(get_html_comment(ui), replacement_text="_") # NOTICE: 确保文件名是合法的！
-      ui_path = os.path.join(project_path, "ui", "1.0.0", f"{name}.html")
-      html_paths.append(ui_path)
+      ui_path = os.path.join(project_path, "ui", "1.0.0", f"{name}.vue")
+      vue_paths.append(ui_path)
       with open(ui_path, "w", encoding="utf-8") as f:
         f.write(ui)
-    await generate_screenshots(html_paths)
+    await generate_vue_element_screenshots(vue_paths, imports)
 
   def clear_ui(self, project_path: str):
     directory = os.path.join(project_path, "ui", "1.0.0")

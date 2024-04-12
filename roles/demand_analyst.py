@@ -14,6 +14,7 @@ from snowdream_company.actions.restorable_action import RestorableAction
 from snowdream_company.tool.markdown import demands_to_markdown, get_lang_content
 from metagpt.actions.add_requirement import UserRequirement
 from snowdream_company.tool.type import is_same_action
+from snowdream_company.tool.ui import get_user_input
 
 class DemandAnalysis(RestorableAction):
   """
@@ -146,7 +147,8 @@ class DemandComuniacate(RestorableAction):
     """
     获取用户的回答
     """
-    user_content = input("你的回答（end代表没有问题了）：")
+    user_content = get_user_input("需求沟通", "你的回答（end代表没有问题了）：")
+    logger.info(user_content)
     use_msg = Message(content=user_content, role="user", cause_by=type(self))
     self.role.add_memory(use_msg)
 
