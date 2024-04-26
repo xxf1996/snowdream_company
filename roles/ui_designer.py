@@ -22,22 +22,28 @@ task1: 任务的详细描述
 task2: 任务的详细描述
 ```
 
-```html
+```vue
 <!-- 模块名称和描述 -->
-<div>该模块的布局结构</div>
-...
-<style>
-/** 该模块的样式和动画 */
+<template>
+  <div>该模块的布局结构</div>
+</template>
+<script setup>
+</script>
+<style scoped>
+/** 该模块用到的样式和动画 */
 ...
 </style>
 ```
 
-```html
+```vue
 <!-- 模块名称和描述 -->
-<div>该模块的布局结构</div>
-...
-<style>
-/** 该模块的样式和动画 */
+<template>
+  <div>该模块的布局结构</div>
+</template>
+<script setup>
+</script>
+<style scoped>
+/** 该模块用到的样式和动画 */
 ...
 </style>
 ```
@@ -45,14 +51,18 @@ task2: 任务的详细描述
 ```generate-image
 图片名字.png
 关于图片的描述信息
+...
 ```
 
 ```generate-image
 图片名字.png
 关于图片的描述信息
+...
 ```
 
-（注意：task、html和generate-image代码块不能互相包含，每个代码块都是独立的！）
+```json
+["npm包名1", ..., "npm包名N"]
+```
 
 - [ ]: task1
 - [x]: task2

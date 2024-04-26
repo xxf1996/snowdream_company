@@ -35,14 +35,17 @@ async def generate_vue_element_screenshots(files: list[str], imports: list[str])
     import_map: dict[str, str] = {}
 
     for pck in imports:
+      if pck in ['vue', 'element-plus']:
+        continue
       import_map[pck] = f"https://cdn.jsdelivr.net/npm/{pck}"
 
     map_content = json.dumps({
-      imports: import_map
+      'imports': import_map
     })
     import_map_json: str = await page.evaluate(f"window.encodeURIComponent(`{map_content}`)")
 
     for file in files:
+      # FIXME: 截图有一定几率白屏，且看不到交互，应该直接在VSCode预览？
       file_content = get_file_content(file)
       code: str = await page.evaluate(f"window.encodeURIComponent(`{file_content}`)")
       await page.goto(f"https://localhost:5173/?code={code}&map={import_map_json}")
